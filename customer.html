@@ -58,7 +58,8 @@ body{
 .app-header{background:rgba(2,5,9,0.96);border-bottom:1px solid rgba(0,245,255,0.10);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);}
 .header-logo{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:1.5px;}
 .header-sub{font-size:10px;color:var(--t40);}
-.header-tv{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:1px;background:rgba(0,245,255,0.10);border:1px solid rgba(0,245,255,0.25);color:var(--cyan);padding:4px 10px;border-radius:20px;}
+.header-tv{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:1px;background:rgba(0,245,255,0.10);border:1px solid rgba(0,245,255,0.25);color:var(--cyan);padding:4px 10px;border-radius:20px;position:relative;}
+.header-tv-badge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font-size:7px;font-family:'Orbitron',monospace;min-width:14px;height:14px;border-radius:50%;display:none;align-items:center;justify-content:center;animation:bounce 1.2s infinite;}
 .change-btn{font-size:10px;color:rgba(168,200,240,0.45);background:none;border:1px solid rgba(168,200,240,0.15);padding:4px 10px;border-radius:20px;font-family:'Rajdhani',sans-serif;transition:all .2s;}
 
 /* Tab Nav */
@@ -222,7 +223,7 @@ body{
       <div class="header-sub" id="hNama"></div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
-      <div class="header-tv" id="hTV">TV ?</div>
+      <div class="header-tv" id="hTV">TV ?<span class="header-tv-badge" id="bdTV"></span></div>
       <button class="change-btn" onclick="gantiTV()">Ganti</button>
     </div>
   </div>
@@ -724,11 +725,11 @@ function renderPesanan(all){
     batal:    { cls:'s-batal',    label:'❌ BATAL'    }
   }
 
-  // Badge pesanan selesai baru
-  let newSelesai = 0
+  // Badge pesanan: hitung yang diproses/selesai & tab tidak aktif
+  let newCount = 0
   el.innerHTML = mine.map(([id, o]) => {
     const cfg = statusCfg[o.status] || statusCfg.pending
-    if(o.status === 'selesai') newSelesai++
+    if(o.status === 'diproses' || o.status === 'selesai') newCount++
     const waktu = o.createdAt ? new Date(o.createdAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : ''
     const itemsTxt = (o.items||[]).map(i => `${escH(i.nama)} x${i.qty}${i.note ? ` <span style="color:rgba(168,200,240,0.45);font-size:10px;">(${escH(i.note)})</span>` : ''}`).join(', ')
     return `<div class="order-card">
@@ -743,6 +744,31 @@ function renderPesanan(all){
       </div>
     </div>`
   }).join('')
+
+  // Update badge tab PESANAN & icon TV
+  if(!document.getElementById('tbPesanan').classList.contains('active') && newCount > 0){
+    const bp = document.getElementById('bdPesanan')
+    bp.textContent = newCount > 9 ? '9+' : newCount
+    bp.style.display = 'flex'
+  }
+  _updateTVBadge()
+}
+
+// ── Update badge icon TV (gabungan chat + pesanan) ──────────
+function _updateTVBadge(){
+  const bp = document.getElementById('bdPesanan')
+  const bc = document.getElementById('bdChat')
+  const bt = document.getElementById('bdTV')
+  if(!bt) return
+  const pCount = parseInt(bp?.textContent||0) || 0
+  const cCount = parseInt(bc?.textContent||0) || 0
+  const total  = (bp?.style.display!=='none'?pCount:0) + (bc?.style.display!=='none'?cCount:0)
+  if(total > 0){
+    bt.textContent   = total > 9 ? '9+' : total
+    bt.style.display = 'flex'
+  } else {
+    bt.style.display = 'none'
+  }
 }
 
 // ══════════════════════════════════════
@@ -809,6 +835,7 @@ function renderChat(all){
       const b = document.getElementById('bdChat')
       b.style.display = 'flex'
       b.textContent   = opMsgs.length > 9 ? '9+' : opMsgs.length
+      _updateTVBadge()
     }
   }
 }
@@ -846,8 +873,8 @@ function switchTab(tab){
   })
   document.getElementById('tb'+tabs[tab])?.classList.add('active')
   document.getElementById('tab'+tabs[tab])?.classList.add('active')
-  if(tab==='chat'){ const b=document.getElementById('bdChat'); b.style.display='none'; b.textContent=''; setTimeout(()=>{ document.getElementById('chatMessages').scrollTop=99999 },100) }
-  if(tab==='pesanan'){ const b=document.getElementById('bdPesanan'); b.style.display='none'; b.textContent='' }
+  if(tab==='chat'){ const b=document.getElementById('bdChat'); b.style.display='none'; b.textContent=''; setTimeout(()=>{ document.getElementById('chatMessages').scrollTop=99999 },100); _updateTVBadge() }
+  if(tab==='pesanan'){ const b=document.getElementById('bdPesanan'); b.style.display='none'; b.textContent=''; _updateTVBadge() }
 }
 
 function openModal(id)  { document.getElementById(id).classList.add('open') }
