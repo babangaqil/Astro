@@ -223,7 +223,7 @@ body{
       <div class="header-sub" id="hNama"></div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
-      <div class="header-tv" id="hTV">TV ?<span class="header-tv-badge" id="bdTV"></span></div>
+      <div class="header-tv" id="hTV"><span id="hTVLabel">TV ?</span><span class="header-tv-badge" id="bdTV"></span></div>
       <button class="change-btn" onclick="gantiTV()">Ganti</button>
     </div>
   </div>
@@ -365,7 +365,6 @@ let currentNama = ''
 let cart        = []
 let curItem     = null
 let curQty      = 1
-let myOrderIds  = JSON.parse(localStorage.getItem('_cust_oids') || '[]')
 
 // ── Decrypt config (sama seperti index.html) ──
 function _decryptCfg(enc){
@@ -426,7 +425,13 @@ const _clientId = new URLSearchParams(location.search).get('db')
 
 // ── Setelah DB siap ──
 function onDbReady(){
-  // Load branding dari Firebase
+  // Restore sesi sebelumnya
+  const savedNama = localStorage.getItem('_cust_nama_' + _clientId)
+  const savedTV   = localStorage.getItem('_cust_tv_'   + _clientId)
+  if(savedNama) document.getElementById('inputNama').value = savedNama
+
+  // Load branding dari Firebase — semua logic (termasuk auto-login) dijalankan
+  // SETELAH settings selesai diload agar dropdown TV & branding sudah siap
   db.ref('settings').once('value', snap => {
     const s = snap.val() || {}
     const nama     = s.bookingSiteNama     || s.titleTop || 'ASTROPHILE'
@@ -443,24 +448,31 @@ function onDbReady(){
     for(let i=1; i<=total; i++){
       sel.innerHTML += `<option value="${i}">TV ${i}</option>`
     }
+
+    // Restore savedTV SETELAH options sudah ada
+    if(savedTV) sel.value = String(savedTV)
+
+    document.getElementById('loadScreen').style.display = 'none'
+
+    // Auto-login jika ada sesi tersimpan (dipindah ke sini agar settings sudah siap)
+    if(savedNama && savedTV){
+      currentNama = savedNama
+      currentTV   = parseInt(savedTV)
+      startApp()
+    } else {
+      document.getElementById('setupScreen').style.display = 'flex'
+    }
+  }, () => {
+    // Fallback jika settings gagal diambil
+    document.getElementById('loadScreen').style.display = 'none'
+    if(savedNama && savedTV){
+      currentNama = savedNama
+      currentTV   = parseInt(savedTV)
+      startApp()
+    } else {
+      document.getElementById('setupScreen').style.display = 'flex'
+    }
   })
-
-  // Restore sesi sebelumnya
-  const savedNama = localStorage.getItem('_cust_nama_' + _clientId)
-  const savedTV   = localStorage.getItem('_cust_tv_'   + _clientId)
-  if(savedNama) document.getElementById('inputNama').value = savedNama
-  if(savedTV)   document.getElementById('selectTV').value  = savedTV
-
-  document.getElementById('loadScreen').style.display  = 'none'
-
-  // Auto-login jika ada sesi tersimpan
-  if(savedNama && savedTV){
-    currentNama = savedNama
-    currentTV   = parseInt(savedTV)
-    startApp()
-  } else {
-    document.getElementById('setupScreen').style.display = 'flex'
-  }
 }
 
 // ══════════════════════════════════════
@@ -481,15 +493,20 @@ function doMasuk(){
 }
 
 function gantiTV(){
+  if(db && currentTV){
+    db.ref(`orders/tv${currentTV}`).off()
+    db.ref(`chats/tv${currentTV}`).off()
+  }
   document.getElementById('appShell').style.display    = 'none'
   document.getElementById('setupScreen').style.display = 'flex'
   document.getElementById('inputNama').value = currentNama
+  document.getElementById('selectTV').value  = currentTV
 }
 
 function startApp(){
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('appShell').style.display    = 'block'
-  document.getElementById('hTV').textContent   = 'TV ' + currentTV
+  document.getElementById('hTVLabel').textContent = 'TV ' + currentTV
   document.getElementById('hNama').textContent = currentNama
   document.getElementById('kSubtitle').textContent = `TV ${currentTV} · ${currentNama}`
   loadMenu()
@@ -504,21 +521,29 @@ function loadMenu(){
   document.getElementById('menuLoading').style.display = 'block'
   document.getElementById('menuContent').style.display = 'none'
   let makanan = [], minuman = []
+  let makananReady = false, minumanReady = false
+  window._menuRef = {} // reset referensi item setiap reload
 
   const updateMenu = () => {
+    if(!makananReady || !minumanReady) return // tunggu keduanya siap
     document.getElementById('menuLoading').style.display = 'none'
     document.getElementById('menuContent').style.display = 'block'
     renderMenu(makanan, minuman)
   }
 
+  db.ref('kantin/makanan').off()
+  db.ref('kantin/minuman').off()
+
   db.ref('kantin/makanan').on('value', snap => {
     const _mRaw = snap.val()
     makanan = _mRaw ? (typeof _mRaw === 'string' ? JSON.parse(_mRaw) : (Array.isArray(_mRaw) ? _mRaw : Object.values(_mRaw))) : (JSON.parse(localStorage.getItem('ps_makanan')||'[]'))
+    makananReady = true
     updateMenu()
   })
   db.ref('kantin/minuman').on('value', snap => {
     const _miRaw = snap.val()
     minuman = _miRaw ? (typeof _miRaw === 'string' ? JSON.parse(_miRaw) : (Array.isArray(_miRaw) ? _miRaw : Object.values(_miRaw))) : (JSON.parse(localStorage.getItem('ps_minuman')||'[]'))
+    minumanReady = true
     updateMenu()
   })
 }
@@ -528,12 +553,12 @@ function renderMenu(makanan, minuman){
   let html = ''
   if(makanan.length){
     html += `<div class="menu-category"><div class="sec-label">🍔 MAKANAN</div><div class="menu-grid">`
-    makanan.forEach(item => html += menuCard(item,'makanan'))
+    makanan.forEach((item, i) => html += menuCard(item,'makanan', i))
     html += `</div></div>`
   }
   if(minuman.length){
     html += `<div class="menu-category"><div class="sec-label">🥤 MINUMAN</div><div class="menu-grid">`
-    minuman.forEach(item => html += menuCard(item,'minuman'))
+    minuman.forEach((item, i) => html += menuCard(item,'minuman', i))
     html += `</div></div>`
   }
   if(!makanan.length && !minuman.length){
@@ -542,14 +567,14 @@ function renderMenu(makanan, minuman){
   el.innerHTML = html
 }
 
-function menuCard(item, jenis){
+function menuCard(item, jenis, idx){
   const habis = item.stock !== '' && item.stock !== undefined && item.stock !== null && Number(item.stock) <= 0
   const emoji = jenis === 'makanan' ? '🍔' : '🥤'
   const imgHtml = item.gambar ? `<img src="${item.gambar}" alt="${escH(item.nama)}" loading="lazy">` : emoji
-  const safeId = escH(item.id || item.nama || '')
+  const refKey = jenis + '_' + idx
   if(!window._menuRef) window._menuRef = {}
-  window._menuRef[safeId] = item
-  const onclick = habis ? '' : `onclick="openItem('${safeId}','${jenis}')"`
+  window._menuRef[refKey] = item
+  const onclick = habis ? '' : `onclick="openItem('${refKey}','${jenis}')"`
   const stokTxt = (item.stock !== '' && item.stock !== undefined && item.stock !== null)
     ? (habis ? '<div class="menu-stok-habis">HABIS</div>' : `<div style="font-size:9px;color:rgba(168,200,240,0.50);margin-top:2px;">Stok: ${item.stock}</div>`)
     : ''
@@ -594,7 +619,8 @@ function updateModalQty(){
 
 function addToCart(){
   const note = document.getElementById('mItemNote').value.trim()
-  const ex = cart.find(c => c.id === curItem.id && c.note === note)
+  const itemKey = curItem.id || curItem.nama
+  const ex = cart.find(c => (c.id || c.nama) === itemKey && c.note === note)
   if(ex) ex.qty += curQty
   else   cart.push({ ...curItem, qty: curQty, note })
   closeModal('mItem')
@@ -664,8 +690,6 @@ async function submitOrder(){
   }
   try{
     const ref = await db.ref(`orders/tv${currentTV}`).push(order)
-    myOrderIds.push(ref.key)
-    localStorage.setItem('_cust_oids', JSON.stringify(myOrderIds))
     // Notif ke operator
     await db.ref(`notifications/orders/${ref.key}`).set({ tv:currentTV, nama:currentNama, total, orderId:ref.key, createdAt:Date.now(), read:false })
     cart = []; updateKBar()
@@ -701,9 +725,12 @@ function showSukses(order){
 // LISTEN ORDERS
 // ══════════════════════════════════════
 function listenOrders(){
-  db.ref(`orders/tv${currentTV}`).on('value', snap => {
+  const ref = db.ref(`orders/tv${currentTV}`)
+  ref.off()
+  ref.on('value', snap => {
     renderPesanan(snap.val() || {})
   }, err => {
+    ref.off()
     // Reconnect setiap 5 detik jika error
     setTimeout(listenOrders, 5000)
   })
@@ -746,10 +773,16 @@ function renderPesanan(all){
   }).join('')
 
   // Update badge tab PESANAN & icon TV
-  if(!document.getElementById('tbPesanan').classList.contains('active') && newCount > 0){
+  const tabAktif = document.getElementById('tbPesanan').classList.contains('active')
+  if(!tabAktif && newCount > 0){
     const bp = document.getElementById('bdPesanan')
     bp.textContent = newCount > 9 ? '9+' : newCount
     bp.style.display = 'flex'
+  } else {
+    // Tab aktif atau tidak ada yang baru — clear badge
+    const bp = document.getElementById('bdPesanan')
+    bp.style.display = 'none'
+    bp.textContent   = ''
   }
   _updateTVBadge()
 }
@@ -774,26 +807,12 @@ function _updateTVBadge(){
 // ══════════════════════════════════════
 // CHAT
 // ══════════════════════════════════════
-// Auto-refresh pesanan setiap 5 detik
-setInterval(() => {
-  if(currentTV && db){
-    db.ref(`orders/tv${currentTV}`).once('value', snap => {
-      renderPesanan(snap.val() || {})
-    })
-  }
-}, 5000)
 
-// Auto-refresh halaman setiap 60 detik tanpa reset sesi
-setInterval(() => {
-  if(currentTV && db){
-    loadMenu()
-  }
-}, 60000)
 
-function listenChat(){
-  db.ref(`chats/tv${currentTV}`).on('value', snap => {
-    renderChat(snap.val() || {})
-    // Mark operator messages as readByCustomer
+function _markChatRead(){
+  if(!db || !currentTV) return
+  db.ref(`chats/tv${currentTV}`).once('value', snap => {
+    if(!snap.val()) return
     const updates = {}
     snap.forEach(child => {
       if(child.val().dari === 'operator' && !child.val().readByCustomer){
@@ -801,6 +820,22 @@ function listenChat(){
       }
     })
     if(Object.keys(updates).length) db.ref().update(updates)
+  })
+}
+
+function listenChat(){
+  db.ref(`chats/tv${currentTV}`).on('value', snap => {
+    renderChat(snap.val() || {})
+    // Mark operator messages as readByCustomer hanya jika tab chat sedang aktif
+    if(document.getElementById('tbChat').classList.contains('active')){
+      const updates = {}
+      snap.forEach(child => {
+        if(child.val().dari === 'operator' && !child.val().readByCustomer){
+          updates[`chats/tv${currentTV}/${child.key}/readByCustomer`] = true
+        }
+      })
+      if(Object.keys(updates).length) db.ref().update(updates)
+    }
   })
 }
 
@@ -828,15 +863,21 @@ function renderChat(all){
 
   if(atBottom) el.scrollTop = el.scrollHeight
 
-  // Badge chat jika ada balasan operator & bukan di tab chat
+  // Badge chat jika ada balasan operator yang belum dibaca & bukan di tab chat
   if(!document.getElementById('tbChat').classList.contains('active')){
-    const opMsgs = msgs.filter(m => m.dari === 'operator')
-    if(opMsgs.length){
+    const unreadOp = msgs.filter(m => m.dari === 'operator' && !m.readByCustomer)
+    if(unreadOp.length){
       const b = document.getElementById('bdChat')
       b.style.display = 'flex'
-      b.textContent   = opMsgs.length > 9 ? '9+' : opMsgs.length
+      b.textContent   = unreadOp.length > 9 ? '9+' : unreadOp.length
       _updateTVBadge()
     }
+  } else {
+    // Tab chat sedang aktif — pastikan badge di-clear
+    const b = document.getElementById('bdChat')
+    b.style.display = 'none'
+    b.textContent   = ''
+    _updateTVBadge()
   }
 }
 
@@ -873,7 +914,7 @@ function switchTab(tab){
   })
   document.getElementById('tb'+tabs[tab])?.classList.add('active')
   document.getElementById('tab'+tabs[tab])?.classList.add('active')
-  if(tab==='chat'){ const b=document.getElementById('bdChat'); b.style.display='none'; b.textContent=''; setTimeout(()=>{ document.getElementById('chatMessages').scrollTop=99999 },100); _updateTVBadge() }
+  if(tab==='chat'){ const b=document.getElementById('bdChat'); b.style.display='none'; b.textContent=''; setTimeout(()=>{ document.getElementById('chatMessages').scrollTop=99999 },100); _updateTVBadge(); _markChatRead() }
   if(tab==='pesanan'){ const b=document.getElementById('bdPesanan'); b.style.display='none'; b.textContent=''; _updateTVBadge() }
 }
 
